@@ -325,6 +325,18 @@ export default function RoastGameboard({
     );
   }
 
+  // A card is only actually playable if it either needs no target at all,
+  // or it needs a target AND at least one legal target currently exists.
+  // Without this second check, a card like Dogpile ("only playable on the
+  // current leader") stays lit up and clickable even when the actor IS the
+  // leader — clicking it then opens the target picker onto an empty list
+  // and dead-ends into the "No valid target" toast instead of the card
+  // simply looking (and being) unplayable up front.
+  function hasValidPlay(cardId: string): boolean {
+    if (!requiresTarget(cardId)) return true;
+    return getValidTargets(cardId).length > 0;
+  }
+
   async function handlePlayCard(cardId: string, targetId?: string) {
     if (!isMyTurn || !me) return;
 
@@ -358,6 +370,10 @@ export default function RoastGameboard({
 
     const validTargets = getValidTargets(cardId);
     if (validTargets.length === 0) {
+      // Shouldn't normally fire now that unplayable cards are non-clickable
+      // (isPlayable gates onClick in RoastCard), but kept as a safety net
+      // in case state changes between render and click (e.g. someone else's
+      // move resolves in the same tick).
       toast.error("🚫 No valid target for that card right now!");
       return;
     }
@@ -595,7 +611,8 @@ export default function RoastGameboard({
           ) : (
             <div className="flex flex-wrap justify-center gap-1.5 max-h-48 overflow-y-auto overflow-x-visible pt-10 pb-1">
               {me.hand.map((cardId, i) => {
-                const playable = isMyTurn && !me.isEliminated;
+                const playable =
+                  isMyTurn && !me.isEliminated && hasValidPlay(cardId);
                 return (
                   <RoastCard
                     key={`${cardId}-${i}`}
