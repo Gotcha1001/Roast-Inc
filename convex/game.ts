@@ -365,12 +365,18 @@ export const triggerBotTurn = internalMutation({
       .withIndex("by_room", (q) => q.eq("roomId", roomId))
       .collect();
     const bot = allPlayers.find((p) => p.userId === botId);
-    if (!bot || bot.hand.length === 0) return;
+    if (!bot || bot.hand.length === 0) {
+      await drawCardsLogic(ctx, { roomId, userId: botId, count: 1 });
+      return;
+    }
 
-    // Naive bot: play the first burn/combo card it can, targeting whoever
-    // has the least health; fall back to drawing if it has nothing playable.
+    // Exclude immune players from targeting entirely — attacking them
+    // is a guaranteed throw in playCardLogic.
     const targets = allPlayers.filter(
-      (p) => p.userId !== botId && !p.isEliminated,
+      (p) =>
+        p.userId !== botId &&
+        !p.isEliminated &&
+        !p.shieldCards.includes("wild_immunity"),
     );
     const weakestTarget = [...targets].sort((a, b) => a.health - b.health)[0];
     const playable = bot.hand.find((c) => {
@@ -378,19 +384,25 @@ export const triggerBotTurn = internalMutation({
       return category === "burn" || category === "combo";
     });
 
-    if (playable && weakestTarget) {
-      await playCardLogic(ctx, {
-        roomId,
-        userId: botId,
-        cardId: playable,
-        targetId: weakestTarget.userId,
-      });
-    } else {
+    try {
+      if (playable && weakestTarget) {
+        await playCardLogic(ctx, {
+          roomId,
+          userId: botId,
+          cardId: playable,
+          targetId: weakestTarget.userId,
+        });
+      } else {
+        await drawCardsLogic(ctx, { roomId, userId: botId, count: 1 });
+      }
+    } catch (err) {
+      // Any unexpected rejection (immunity, bad targeted-card rule, etc.)
+      // must never leave the bot stuck on turn — fall back to a draw so
+      // the turn always advances no matter what.
       await drawCardsLogic(ctx, { roomId, userId: botId, count: 1 });
     }
   },
 });
-
 // ─── Internal helpers (server-only, not exported to the client) ─────────
 
 async function applyDamageResult(
